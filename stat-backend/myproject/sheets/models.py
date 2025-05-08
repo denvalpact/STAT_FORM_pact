@@ -16,14 +16,81 @@ class Player(models.Model):
         ('backcourt', 'Backcourt'),
         ('pivot', 'Pivot'),
         ('goalkeeper', 'Goalkeeper'),
+        ('center', 'Center'),
     ])
-
+    age = models.IntegerField(null=True, blank=True)
+    height_cm = models.FloatField(null=True, blank=True)
+    weight_kg = models.FloatField(null=True, blank=True)
 class Match(models.Model):
     home_team = models.ForeignKey(Team, related_name='home_matches', on_delete=models.CASCADE)
     away_team = models.ForeignKey(Team, related_name='away_matches', on_delete=models.CASCADE)
-    date = models.DateTimeField()
+    start_time = models.DateTimeField()  # Real-world start time
+    duration_minutes = models.IntegerField(default=60)  # Handball matches are 60 mins
     home_score = models.IntegerField()
     away_score = models.IntegerField()
+
+    def get_team_stats(self):
+        """Returns stats for both teams in a structured format."""
+        teams = {
+            'home': {
+                'name': self.home_team.name,
+                'players': [],
+                'total_score': 0.0,
+            },
+            'away': {
+                'name': self.away_team.name,
+                'players': [],
+                'total_score': 0.0,
+            }
+        }
+
+        # Fetch all player stats for this match
+        stats = PlayerStats.objects.filter(match=self).select_related('player', 'player__team')
+
+        for stat in stats:
+            team_key = 'home' if stat.player.team == self.home_team else 'away'
+            teams[team_key]['players'].append({
+                'id': stat.player.id,
+                'name': stat.player.name,
+                'goals': stat.goals,
+                'assists': stat.assists,
+                'steals': stat.steals,
+                'total_score': stat.total_score,
+            })
+            teams[team_key]['total_score'] += stat.total_score
+
+        return teams
+
+class PlayerStats(models.Model):
+    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    match = models.ForeignKey(Match, on_delete=models.CASCADE)
+    
+    # Performance metrics (simplified for clarity)
+    goals = models.IntegerField(default=0)
+    assists = models.IntegerField(default=0)
+    steals = models.IntegerField(default=0)
+    blocks = models.IntegerField(default=0)
+    turnovers = models.IntegerField(default=0)
+    suspensions = models.IntegerField(default=0)
+    
+    # Calculated PlayerScore
+    total_score = models.FloatField(default=0.0)
+
+    def calculate_score(self):
+        """Calculate PlayerScore based on weighted actions."""
+        weights = {
+            'goals': 1.0,
+            'assists': 0.6,
+            'steals': 0.8,
+            'blocks': 0.25,
+            'turnovers': -0.6,
+            'suspensions': -0.8,
+        }
+        self.total_score = sum(
+            getattr(self, stat) * weight 
+            for stat, weight in weights.items()
+        )
+        self.save()
 
 
 class MatchEvent(models.Model):
@@ -44,8 +111,8 @@ class MatchEvent(models.Model):
     match = models.ForeignKey(Match, on_delete=models.CASCADE)
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
     event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
-    timestamp = models.DateTimeField()  # Match time (e.g., "00:15:30")
-    period = models.IntegerField()      # 1st/2nd half, overtime
+    match_time_seconds = models.IntegerField()  # Seconds into the match (0-3600 for 60 mins)
+    period = models.IntegerField(choices=[(1, 'First Half'), (2, 'Second Half'), (3, 'Overtime')])
     goal_difference = models.IntegerField()  # e.g., +2, -1, 0
 
 class PlayerScore(models.Model):
@@ -81,11 +148,11 @@ class PlayerScore(models.Model):
         }
         return weights.get(event_type, 0)
 
-    def _get_time_factor(self, timestamp):
-        """Linear increase from 0.5 (start) to 1.5 (end)"""
-        match_duration = 60  # minutes
-        event_minute = timestamp.minute + timestamp.second / 60
-        return 0.5 + (event_minute / match_duration)
+    def _get_time_factor(self, match_time_seconds):
+        """Linear increase from 0.5 (start) to 1.5 (end) based on match progress."""
+        match_duration_seconds = self.match.duration_minutes * 60
+        progress = match_time_seconds / match_duration_seconds  # 0.0 to 1.0
+        return 0.5 + progress  # 0.5 (start) to 1.5 (end)
 
     def _get_score_factor(self, goal_diff):
         """Bell curve: max weight at close scores (±1)"""

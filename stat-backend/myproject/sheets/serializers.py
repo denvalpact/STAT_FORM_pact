@@ -18,3 +18,4 @@ class PlayerScoreSerializer(serializers.ModelSerializer):
     class Meta:
         model = PlayerScore
         fields = ['player', 'match', 'total_score']
+        depth = 1
