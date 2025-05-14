@@ -1,8 +1,11 @@
-# urls.py
 from django.urls import path
-from .views import PlayerScoreListView, PlayerScoreDetailView
+from . import views
 
 urlpatterns = [
-    path('api/playerscores/', PlayerScoreListView.as_view(), name='playerscore-list'),
-    path('api/playerscores/<int:pk>/', PlayerScoreDetailView.as_view(), name='playerscore-detail'),
+    path('matches/<int:match_id>/', views.match_dashboard, name='match-dashboard'),
+    path('matches/<int:match_id>/stats/', views.player_stats, name='player-stats'),
+    path('api/events/', views.record_event, name='record-event'),
+    path('api/matches/<int:match_id>/', views.get_match_state, name='match-state'),
+    path('api/players/', views.team_players, name='team-players'),
+    path('api/stream/<int:match_id>/', views.live_event_stream, name='event-stream'),
 ]

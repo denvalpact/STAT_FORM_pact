@@ -1,6 +1,30 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.contrib.auth.models import AbstractUser
+from django.contrib import admin
 
+
+class User(AbstractUser):
+    ROLE_CHOICES = [
+        ('LEAGUE_OFFICIAL', 'League Official'),
+        ('REFEREE', 'Referee'),
+        ('MANAGER', 'Manager'),
+        ('PLAYER', 'Player'),
+    ]
+    
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    phone_number = models.CharField(max_length=15, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.username} ({self.get_role_display()})"
+
+class Referee(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='referee_profile')
+    license_number = models.CharField(max_length=20, blank=True)
+
+    def __str__(self):
+        return self.user.username
 class Team(models.Model):
     name = models.CharField(max_length=100)
     short_code = models.CharField(max_length=3, default='T')  # e.g., 'A', 'B'
@@ -10,6 +34,7 @@ class Team(models.Model):
         return self.name
 
 class Player(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='player_profile')
     POSITION_CHOICES = [
         ('GK', 'Goalkeeper'),
         ('LW', 'Left Wing'),
@@ -24,7 +49,6 @@ class Player(models.Model):
     number = models.PositiveIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(99)]
     )
-    name = models.CharField(max_length=100)
     position = models.CharField(max_length=2, choices=POSITION_CHOICES)
     is_captain = models.BooleanField(default=False)
     
@@ -33,7 +57,7 @@ class Player(models.Model):
         ordering = ['number']
     
     def __str__(self):
-        return f"{self.number} - {self.name} ({self.get_position_display()})"
+        return f"{self.number} - {self.user.username} ({self.get_position_display()})"
 
 class Match(models.Model):
     STATUS_CHOICES = [
@@ -67,12 +91,7 @@ class Match(models.Model):
         seconds = self.current_time % 60
         return f"{minutes}:{seconds:02d}"
 
-class Referee(models.Model):
-    name = models.CharField(max_length=100)
-    license_number = models.CharField(max_length=20, blank=True)
-    
-    def __str__(self):
-        return self.name
+# Removed duplicate Referee model definition
 
 class MatchEvent(models.Model):
     EVENT_TYPES = [
@@ -167,3 +186,37 @@ class PlayerStat(models.Model):
             self.efficiency = (positive_actions / total_actions * 100) if total_actions > 0 else 0
         
         self.save()
+
+        @admin.register(User)
+        class UserAdmin(admin.ModelAdmin):
+            list_display = ['username', 'email', 'role', 'phone_number']
+            list_filter = ['role']
+            search_fields = ['username', 'email']
+
+        @admin.register(Referee)
+        class RefereeAdmin(admin.ModelAdmin):
+            list_display = ['user', 'license_number']
+            search_fields = ['user__username', 'license_number']
+
+        @admin.register(Team)
+        class TeamAdmin(admin.ModelAdmin):
+            list_display = ['name', 'short_code', 'coach']
+            search_fields = ['name', 'short_code']
+
+        @admin.register(Match)
+        class MatchAdmin(admin.ModelAdmin):
+            list_display = ['home_team', 'away_team', 'date', 'status', 'get_score']
+            list_filter = ['status', 'date']
+            search_fields = ['home_team__name', 'away_team__name']
+
+        @admin.register(MatchEvent)
+        class MatchEventAdmin(admin.ModelAdmin):
+            list_display = ['match', 'event_type', 'team', 'player', 'time_seconds', 'period']
+            list_filter = ['event_type', 'period']
+            search_fields = ['match__home_team__name', 'match__away_team__name', 'player__user__username']
+
+        @admin.register(PlayerStat)
+        class PlayerStatAdmin(admin.ModelAdmin):
+            list_display = ['player', 'match', 'goals', 'assists', 'efficiency']
+            list_filter = ['player__team', 'match']
+            search_fields = ['player__user__username', 'match__home_team__name', 'match__away_team__name']
